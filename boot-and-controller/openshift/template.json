@@ -1,0 +1,212 @@
+{
+  "kind": "Template",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "${SERVICE}",
+    "annotations": {
+      "description": "Cloud target",
+      "tags": "backend",
+      "iconClass": "icon-java"
+    }
+  },
+  "parameters": [
+    {
+      "name": "SERVICE",
+      "description": "Microservice Name",
+      "value": "${SERVICE}",
+      "required": false
+    },
+    {
+      "name": "MEM_ARGS",
+      "value": "-Xmx212m",
+      "required": false
+    },
+    {
+      "name": "MEMORY_LIMIT",
+      "value": "400Mi",
+      "required": false
+    },
+    {
+      "name": "CLIENT_SECRET",
+      "value": "/etc/secret",
+      "description": "Client secret volume path",
+      "required": false
+    },
+    {
+      "name": "ROUTE_HOST",
+      "description": "Default route host",
+      "value": "${SERVICE}-${ENV_NAMESPACE}.${ENV_SERVER_HOSTNAME}",
+      "required": false
+    }
+   ],
+  "objects": [
+    {
+      "kind": "DeploymentConfig",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${SERVICE}",
+        "labels": {
+          "name": "${SERVICE}",
+          "tier": "backend"
+        }
+      },
+      "spec": {
+        "replicas": 1,
+        "strategy": {
+          "type": "Rolling",
+          "rollingParams": {
+            "updatePeriodSeconds": 1,
+            "intervalSeconds": 1,
+            "timeoutSeconds": 600,
+            "maxUnavailable": "25%",
+            "maxSurge": "25%"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "name": "${SERVICE}"
+            }
+          },
+          "spec": {
+            "volumes": [
+              {
+                "name": "client-credentials",
+                "secret": {
+                  "secretName": "${SERVICE}-client-credentials"
+                }
+              }
+            ],
+            "containers": [
+              {
+                "name": "${SERVICE}",
+                "image": "${ENV_IMAGE_REPOSITORY}:${TAG}",
+                "imagePullPolicy": "Always",
+                "args": [
+                  "/usr/bin/java",
+                  "${MEM_ARGS}",
+                  "-Djava.security.egd=file:/dev/./urandom",
+                  "-Dfile.encoding=UTF-8",
+                  "-jar",
+                  "/app/app.jar"
+                ],
+                "ports": [
+                  {
+                    "name": "web",
+                    "containerPort": 8080,
+                    "protocol": "TCP"
+                  }
+                ],
+                "env": [
+                  {
+                    "name": "CLOUD_NAMESPACE",
+                    "valueFrom": {
+                      "fieldRef": {
+                        "fieldPath": "metadata.namespace"
+                      }
+                    }
+                  },
+                  {
+                    "name": "MICROSERVICE_NAME",
+                    "value": "${SERVICE}"
+                  }
+                ],
+                "resources": {
+                  "requests": {
+                    "cpu": "100m",
+                    "memory": "${MEMORY_LIMIT}"
+                  },
+                  "limits": {
+                    "memory": "${MEMORY_LIMIT}",
+                    "cpu": "1"
+                  }
+                },
+                "livenessProbe": {
+                  "httpGet": {
+                    "path": "/health",
+                    "port": "web"
+                  },
+                  "initialDelaySeconds": 300,
+                  "timeoutSeconds": 6
+                },
+                "readinessProbe": {
+                  "httpGet": {
+                    "path": "/health",
+                    "port": "web"
+                  },
+                  "initialDelaySeconds": 9,
+                  "timeoutSeconds": 6
+                },
+                "volumeMounts": [
+                  {
+                    "name": "client-credentials",
+                    "mountPath": "${CLIENT_SECRET}",
+                    "readOnly": true
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "triggers": [
+          {
+            "type": "ConfigChange"
+          }
+        ]
+      }
+    },
+    {
+      "kind": "Service",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${SERVICE}"
+      },
+      "spec": {
+        "ports": [
+          {
+            "name": "web",
+            "port": 8080,
+            "targetPort": 8080
+          },
+          {
+            "name": "debug",
+            "port": 19706,
+            "targetPort": 19706
+           }
+        ],
+        "selector": {
+          "name": "${SERVICE}"
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Route",
+      "host": "${ROUTE_HOST}",
+      "metadata": {
+        "name": "${SERVICE}"
+      },
+      "spec": {
+        "host": "${ROUTE_HOST}",
+        "to": {
+          "kind": "Service",
+          "name": "${SERVICE}"
+        },
+        "port": {
+          "targetPort": "web"
+        }
+      }
+    },
+    {
+      "kind": "ConfigMap",
+      "apiVersion": "v1",
+      "metadata": {
+        "name": "${SERVICE}.monitoring-config"
+      },
+      "data": {
+        "url.health": "http://%(ip)s:8080/health",
+        "url.metrics": "http://%(ip)s:8080/metrics"
+      }
+    }
+  ]
+}

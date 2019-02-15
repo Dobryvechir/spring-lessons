@@ -1,0 +1,1 @@
+java -jar target/boot-and-controller-0.1.0.jar
